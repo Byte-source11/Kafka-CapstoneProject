@@ -1,0 +1,5 @@
+[
+  {"username": "octocat", "interval": "1w"},
+  {"username": "torvalds", "interval": "2d"},
+  {"username": "msubramanian", "interval": "3d"}
+] 
