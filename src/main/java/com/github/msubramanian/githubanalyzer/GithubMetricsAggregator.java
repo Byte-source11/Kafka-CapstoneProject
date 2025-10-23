@@ -57,6 +57,65 @@ public class GithubMetricsAggregator {
                 .toStream()
                 .to("commits-by-language");
 
+        // Average commits per user
+        commitsStream
+                .groupBy((key, value) -> key)
+                .count()
+                .toStream()
+                .mapValues((key, value) -> value / 1.0) // Convert to double for average
+                .to("average-commits-per-user");
+
+        // Total commits per repository
+        commitsStream
+                .mapValues(value -> {
+                    try {
+                        ObjectMapper mapper = new ObjectMapper();
+                        Map<String, Object> commitData = mapper.readValue(value, Map.class);
+                        return (String) commitData.get("repository");
+                    } catch (Exception e) {
+                        return "unknown";
+                    }
+                })
+                .groupBy((key, repository) -> repository)
+                .count()
+                .toStream()
+                .to("total-commits-per-repository");
+
+        // Top 3 repositories by number of commits
+        commitsStream
+                .mapValues(value -> {
+                    try {
+                        ObjectMapper mapper = new ObjectMapper();
+                        Map<String, Object> commitData = mapper.readValue(value, Map.class);
+                        return (String) commitData.get("repository");
+                    } catch (Exception e) {
+                        return "unknown";
+                    }
+                })
+                .groupBy((key, repository) -> repository)
+                .count()
+                .toStream()
+                .sorted((entry1, entry2) -> Long.compare(entry2.getValue(), entry1.getValue())) // Sort by count descending
+                .limit(3) // Limit to top 3
+                .to("top-3-repositories");
+
+        // Total commits per day
+        commitsStream
+                .mapValues(value -> {
+                    try {
+                        ObjectMapper mapper = new ObjectMapper();
+                        Map<String, Object> commitData = mapper.readValue(value, Map.class);
+                        String timestamp = (String) commitData.get("timestamp");
+                        return timestamp.split("T")[0]; // Extract date part
+                    } catch (Exception e) {
+                        return "unknown";
+                    }
+                })
+                .groupBy((key, date) -> date)
+                .count()
+                .toStream()
+                .to("total-commits-per-day");
+
         // Build and start the Kafka Streams application
         KafkaStreams streams = new KafkaStreams(builder.build(), props);
         streams.start();
