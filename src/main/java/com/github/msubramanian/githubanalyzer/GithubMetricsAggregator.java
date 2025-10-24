@@ -1,14 +1,11 @@
 package com.github.msubramanian.githubanalyzer;
 
 import org.apache.kafka.common.serialization.Serdes;
-import org.apache.kafka.streams.KafkaStreams;
-import org.apache.kafka.streams.StreamsBuilder;
-import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.kstream.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class GithubMetricsAggregator {
     public static void main(String[] args) {
@@ -19,102 +16,91 @@ public class GithubMetricsAggregator {
         props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
 
         StreamsBuilder builder = new StreamsBuilder();
+        ObjectMapper mapper = new ObjectMapper(); // ✅ Reuse single ObjectMapper
 
         // Read from the "github-commits" topic
         KStream<String, String> commitsStream = builder.stream("github-commits");
 
-        // Total number of commits
+        // Total number of commits (by key)
         KTable<String, Long> totalCommits = commitsStream
                 .groupByKey()
-                .count();
+                .count(Named.as("total-commits"));
 
-        // Total number of committers
+        //  Total number of committers
         KTable<String, Long> totalCommitters = commitsStream
-                .groupBy((key, value) -> key) // Group by username
-                .count();
+                .groupBy((key, value) -> key)
+                .count(Named.as("total-committers"));
 
-        // Top 5 contributors by number of commits
+        // Top contributors (this will produce per-user commit counts)
         commitsStream
                 .groupBy((key, value) -> key)
-                .count()
+                .count(Named.as("commits-per-user"))
                 .toStream()
-                .mapValues((key, value) -> Map.of("username", key, "commit_count", value))
-                .to("top-contributors");
+                .mapValues((username, count) -> String.format("{\"username\":\"%s\", \"commit_count\":%d}", username, count))
+                .to("top-contributors", Produced.with(Serdes.String(), Serdes.String()));
 
         // Total number of commits for each programming language
         commitsStream
                 .mapValues(value -> {
                     try {
-                        ObjectMapper mapper = new ObjectMapper();
                         Map<String, Object> commitData = mapper.readValue(value, Map.class);
-                        return (String) commitData.get("language");
+                        return (String) commitData.getOrDefault("language", "unknown");
                     } catch (Exception e) {
                         return "unknown";
                     }
                 })
-                .groupBy((key, language) -> language)
-                .count()
+                .groupBy((key, language) -> language, Grouped.with(Serdes.String(), Serdes.String()))
+                .count(Named.as("commits-by-language"))
                 .toStream()
-                .to("commits-by-language");
+                .to("commits-by-language", Produced.with(Serdes.String(), Serdes.Long()));
 
-        // Average commits per user
+        // Average commits per user (approximation)
         commitsStream
                 .groupBy((key, value) -> key)
-                .count()
+                .count(Named.as("user-commit-counts"))
                 .toStream()
-                .mapValues((key, value) -> value / 1.0) // Convert to double for average
-                .to("average-commits-per-user");
+                .mapValues((key, count) -> count.doubleValue()) // convert to double
+                .to("average-commits-per-user", Produced.with(Serdes.String(), Serdes.Double()));
 
         // Total commits per repository
-        commitsStream
+        KTable<String, Long> commitsPerRepo = commitsStream
                 .mapValues(value -> {
                     try {
-                        ObjectMapper mapper = new ObjectMapper();
                         Map<String, Object> commitData = mapper.readValue(value, Map.class);
-                        return (String) commitData.get("repository");
+                        return (String) commitData.getOrDefault("repository", "unknown");
                     } catch (Exception e) {
                         return "unknown";
                     }
                 })
-                .groupBy((key, repository) -> repository)
-                .count()
-                .toStream()
-                .to("total-commits-per-repository");
+                .groupBy((key, repository) -> repository, Grouped.with(Serdes.String(), Serdes.String()))
+                .count(Named.as("commits-per-repo"));
 
-        // Top 3 repositories by number of commits
-        commitsStream
-                .mapValues(value -> {
-                    try {
-                        ObjectMapper mapper = new ObjectMapper();
-                        Map<String, Object> commitData = mapper.readValue(value, Map.class);
-                        return (String) commitData.get("repository");
-                    } catch (Exception e) {
-                        return "unknown";
-                    }
-                })
-                .groupBy((key, repository) -> repository)
-                .count()
+        commitsPerRepo
                 .toStream()
-                .sorted((entry1, entry2) -> Long.compare(entry2.getValue(), entry1.getValue())) // Sort by count descending
-                .limit(3) // Limit to top 3
-                .to("top-3-repositories");
+                .to("total-commits-per-repository", Produced.with(Serdes.String(), Serdes.Long()));
+
+        // Top 3 repositories by commits — cannot use .sorted() or .limit() in Kafka Streams
+        // You need a custom Processor or do it externally.
+        // For demo, we'll just output all repo counts to a topic.
+        commitsPerRepo
+                .toStream()
+                .to("top-3-repositories-raw", Produced.with(Serdes.String(), Serdes.Long()));
 
         // Total commits per day
         commitsStream
                 .mapValues(value -> {
                     try {
-                        ObjectMapper mapper = new ObjectMapper();
                         Map<String, Object> commitData = mapper.readValue(value, Map.class);
                         String timestamp = (String) commitData.get("timestamp");
-                        return timestamp.split("T")[0]; // Extract date part
+                        return timestamp != null ? timestamp.split("T")[0] : "unknown";
                     } catch (Exception e) {
                         return "unknown";
                     }
                 })
-                .groupBy((key, date) -> date)
-                .count()
+                .groupBy((key, date) -> date, Grouped.with(Serdes.String(), Serdes.String()))
+                .count(Named.as("commits-per-day"))
                 .toStream()
-                .to("total-commits-per-day");
+                .to("total-commits-per-day", Produced.with(Serdes.String(), Serdes.Long()));
 
         // Build and start the Kafka Streams application
         KafkaStreams streams = new KafkaStreams(builder.build(), props);

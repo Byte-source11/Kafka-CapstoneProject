@@ -1,4 +1,6 @@
 com/github/msubramanian/githubanalyzer/GithubCommitFetcher$2.class
 com/github/msubramanian/githubanalyzer/GithubCommitFetcher.class
 com/github/msubramanian/githubanalyzer/GithubAccountProducer.class
+com/github/msubramanian/githubanalyzer/GithubKafkaApplication.class
+com/github/msubramanian/githubanalyzer/GithubMetricsAggregator.class
 com/github/msubramanian/githubanalyzer/GithubCommitFetcher$1.class

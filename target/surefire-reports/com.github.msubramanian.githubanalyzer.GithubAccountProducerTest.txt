@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: com.github.msubramanian.githubanalyzer.GithubAccountProducerTest
+-------------------------------------------------------------------------------
+Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.503 s -- in com.github.msubramanian.githubanalyzer.GithubAccountProducerTest

@@ -2,18 +2,22 @@ package com.github.msubramanian.githubanalyzer;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
+
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
-import org.springframework.kafka.test.EmbeddedKafkaBroker;
 
 import java.util.Map;
 
+@SpringBootTest
 @EmbeddedKafka(partitions = 1, topics = {"github-accounts"}, bootstrapServersProperty = "spring.kafka.bootstrap-servers")
 public class GithubAccountProducerTest {
 
@@ -28,23 +32,27 @@ public class GithubAccountProducerTest {
 
     @Test
     public void testProducerSendsMessage() {
-        // Producer configuration
+    
         Map<String, Object> producerProps = KafkaTestUtils.producerProps(embeddedKafkaBroker);
+        producerProps.put("key.serializer", StringSerializer.class);
+        producerProps.put("value.serializer", StringSerializer.class);
+
         DefaultKafkaProducerFactory<String, String> producerFactory = new DefaultKafkaProducerFactory<>(producerProps);
         var producer = producerFactory.createProducer();
 
-        // Send a message to the github-accounts topic
-        producer.send(new ProducerRecord<>("github-accounts", "test-key", "test-value"));
+        String topic = "github-accounts";
+        producer.send(new ProducerRecord<>(topic, "test-key", "test-value"));
         producer.flush();
 
-        // Consumer configuration
         Map<String, Object> consumerProps = KafkaTestUtils.consumerProps("test-group", "true", embeddedKafkaBroker);
-        DefaultKafkaConsumerFactory<String, String> consumerFactory = new DefaultKafkaConsumerFactory<>(consumerProps, new StringDeserializer(), new StringDeserializer());
-        var consumer = consumerFactory.createConsumer();
-        embeddedKafkaBroker.consumeFromAnEmbeddedTopic(consumer, "github-accounts");
+        consumerProps.put("key.deserializer", StringDeserializer.class);
+        consumerProps.put("value.deserializer", StringDeserializer.class);
 
-        // Validate the message
-        ConsumerRecord<String, String> record = KafkaTestUtils.getSingleRecord(consumer, "github-accounts");
+        DefaultKafkaConsumerFactory<String, String> consumerFactory = new DefaultKafkaConsumerFactory<>(consumerProps);
+        var consumer = consumerFactory.createConsumer();
+        embeddedKafkaBroker.consumeFromAnEmbeddedTopic(consumer, topic);
+
+        ConsumerRecord<String, String> record = KafkaTestUtils.getSingleRecord(consumer, topic);
         assertEquals("test-key", record.key());
         assertEquals("test-value", record.value());
     }
